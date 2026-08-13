@@ -1,0 +1,191 @@
+{
+  "name": "End-to-End-Sales-Data-Analysis-Pipeline-Automate",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "documentId": {
+          "__rl": true,
+          "value": "1Qeee5uTyyAPT96Iw8zQgc1Tpb6hVMIyD9hYR5tlgQFk",
+          "mode": "list",
+          "cachedResultName": "Sales Data",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1Qeee5uTyyAPT96Iw8zQgc1Tpb6hVMIyD9hYR5tlgQFk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2094562406,
+          "mode": "list",
+          "cachedResultName": "sales_data",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1Qeee5uTyyAPT96Iw8zQgc1Tpb6hVMIyD9hYR5tlgQFk/edit#gid=2094562406"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [
+        -64,
+        -112
+      ],
+      "id": "42cac095-2817-4e1f-9768-1da113348ab4",
+      "name": "Google Sheets Trigger",
+      "credentials": {
+        "googleSheetsTriggerOAuth2Api": {
+          "id": "fxTz0m5xzlFYMm6p",
+          "name": "Google Sheets Trigger account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst cleanedData = items.map((item) => {\n  const cleanedItem = { ...item.json };\n  // Remove unnecessary characters from Sales_Rep\n  cleanedItem.Sales_Rep = cleanedItem.Sales_Rep.replace(/[^a-zA-Z ]/g, \"\");\n  // Convert Sale_Date to Date object\n  cleanedItem.Sale_Date = new Date(cleanedItem.Sale_Date);\n  // Split Region_and_Sales_Rep into separate fields\n  const [Region, Sales_Rep] = cleanedItem.Region_and_Sales_Rep.split(\" and \");\n  cleanedItem.Region = Region;\n  cleanedItem.Sales_Rep = Sales_Rep;\n  // Remove the combined field\n  delete cleanedItem.Region_and_Sales_Rep;\n  return { json: cleanedItem };\n});\nreturn cleanedData;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        160,
+        -112
+      ],
+      "id": "4a1d6d31-32e8-4c04-8d8b-5315b098d502",
+      "name": "Data Cleaning"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// =======================\n// MASTER TOTALS\n// =======================\nlet totalRevenue = 0;\nlet totalOrders = 0;\nlet totalQuantity = 0;\nlet totalProfit = 0; // ✅ ADDED\n\n// =======================\n// AGGREGATORS\n// =======================\nconst revenueByRegion = {};\nconst revenueByProductCategory = {};\nconst ordersByPaymentMethod = {};\nconst revenueBySalesChannel = {};\nconst ordersByDate = {};\n\n// =======================\n// PROCESS ROWS\n// =======================\nitems.forEach(item => {\n  const row = item.json;\n\n  const revenue = parseFloat(row.Sales_Amount) || 0;\n  const quantity = parseFloat(row.Quantity_Sold) || 0;\n\n  const unitPrice = parseFloat(row.Unit_Price) || 0;   // ✅ ADDED\n  const unitCost = parseFloat(row.Unit_Cost) || 0;     // ✅ ADDED\n  const profit = (unitPrice - unitCost) * quantity;    // ✅ ADDED\n\n  const region = row.Region || \"Unknown\";\n  const category = row.Product_Category || \"Unknown\";\n  const paymentMethod = row.Payment_Method || \"Unknown\";\n  const salesChannel = row.Sales_Channel || \"Unknown\";\n  const date = row.Sale_Date ? row.Sale_Date.split(\"T\")[0] : \"Unknown\";\n\n  // ---------- Totals ----------\n  totalRevenue += revenue;\n  totalOrders += 1;\n  totalQuantity += quantity;\n  totalProfit += profit; // ✅ ADDED\n\n  // ---------- Revenue by Region ----------\n  revenueByRegion[region] =\n    (revenueByRegion[region] || 0) + revenue;\n\n  // ---------- Revenue by Product Category ----------\n  revenueByProductCategory[category] =\n    (revenueByProductCategory[category] || 0) + revenue;\n\n  // ---------- Orders by Payment Method ----------\n  ordersByPaymentMethod[paymentMethod] =\n    (ordersByPaymentMethod[paymentMethod] || 0) + 1;\n\n  // ---------- Revenue by Sales Channel ----------\n  revenueBySalesChannel[salesChannel] =\n    (revenueBySalesChannel[salesChannel] || 0) + revenue;\n\n  // ---------- Orders by Date ----------\n  ordersByDate[date] =\n    (ordersByDate[date] || 0) + 1;\n});\n\n// =======================\n// HELPER: TOP CONTRIBUTOR\n// =======================\nconst getTop = (obj) =>\n  Object.entries(obj).sort((a, b) => b[1] - a[1])[0];\n\n// =======================\n// DERIVED KPIs\n// =======================\nconst avgOrderValue = totalRevenue / totalOrders;\nconst avgQuantityPerOrder = totalQuantity / totalOrders;\n\nconst topRegion = getTop(revenueByRegion);\nconst topCategory = getTop(revenueByProductCategory);\nconst topChannel = getTop(revenueBySalesChannel);\n\n// =======================\n// FINAL OUTPUT\n// =======================\nreturn [\n  {\n    json: {\n      // -------- KPI CARDS --------\n      totalRevenue: Number(totalRevenue.toFixed(2)),\n      totalProfit: Number(totalProfit.toFixed(2)), // ✅ ADDED\n      totalOrders,\n      totalQuantitySold: Number(totalQuantity.toFixed(2)),\n      averageOrderValue: Number(avgOrderValue.toFixed(2)),\n      averageQuantityPerOrder: Number(avgQuantityPerOrder.toFixed(2)),\n\n      // -------- TOP CONTRIBUTORS --------\n      topRegionByRevenue: {\n        region: topRegion[0],\n        revenue: Number(topRegion[1].toFixed(2)),\n        percentageOfTotalRevenue: Number(\n          ((topRegion[1] / totalRevenue) * 100).toFixed(2)\n        ),\n      },\n\n      topCategoryByRevenue: {\n        category: topCategory[0],\n        revenue: Number(topCategory[1].toFixed(2)),\n        percentageOfTotalRevenue: Number(\n          ((topCategory[1] / totalRevenue) * 100).toFixed(2)\n        ),\n      },\n\n      topSalesChannelByRevenue: {\n        channel: topChannel[0],\n        revenue: Number(topChannel[1].toFixed(2)),\n        percentageOfTotalRevenue: Number(\n          ((topChannel[1] / totalRevenue) * 100).toFixed(2)\n        ),\n      },\n\n      // -------- CHART DATA --------\n      revenueByRegion,\n      revenueByProductCategory,\n      ordersByPaymentMethod,\n      revenueBySalesChannel,\n      ordersByDate,\n\n      // -------- DATA QUALITY --------\n      numberOfUniqueRegions: Object.keys(revenueByRegion).length,\n      numberOfUniqueCategories: Object.keys(revenueByProductCategory).length,\n      numberOfPaymentMethods: Object.keys(ordersByPaymentMethod).length,\n    },\n  },\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        384,
+        -112
+      ],
+      "id": "676086df-31f8-449e-a43e-89c3b68355fd",
+      "name": "KPIs & Metrics"
+    },
+    {
+      "parameters": {
+        "jsCode": "const kpi = $input.first().json;\n\n// -------------------------------\n// Helper: Build Chart.js config\n// -------------------------------\nconst buildChart = (type, title, labels, data) => ({\n  type,\n  data: {\n    labels,\n    datasets: [\n      {\n        label: title,\n        data,\n        backgroundColor: [\n          \"#4F46E5\",\n          \"#22C55E\",\n          \"#F97316\",\n          \"#EF4444\",\n          \"#06B6D4\",\n          \"#8B5CF6\",\n          \"#EC4899\"\n        ],\n        borderWidth: 1,\n        fill: false\n      }\n    ]\n  },\n  options: {\n    responsive: true,\n    plugins: {\n      title: {\n        display: true,\n        text: title,\n        font: { size: 16 }\n      },\n      legend: {\n        display: type !== \"bar\"\n      }\n    },\n    scales: type === \"bar\" || type === \"line\"\n      ? { y: { beginAtZero: true } }\n      : {}\n  }\n});\n\n// -------------------------------\n// Helper: Convert chart → URL\n// -------------------------------\nconst toQuickChartUrl = (chartConfig) =>\n  \"https://quickchart.io/chart?c=\" +\n  encodeURIComponent(JSON.stringify(chartConfig));\n\n// -------------------------------\n// Chart 1: Revenue by Category\n// -------------------------------\nconst revenueByCategory = buildChart(\n  \"bar\",\n  \"Revenue by Product Category\",\n  Object.keys(kpi.revenueByProductCategory),\n  Object.values(kpi.revenueByProductCategory)\n);\n\n// -------------------------------\n// Chart 2: Orders by Payment Method\n// -------------------------------\nconst ordersByPaymentMethod = buildChart(\n  \"pie\",\n  \"Orders by Payment Method\",\n  Object.keys(kpi.ordersByPaymentMethod),\n  Object.values(kpi.ordersByPaymentMethod)\n);\n\n// -------------------------------\n// Chart 3: Revenue by Sales Channel\n// -------------------------------\nconst revenueBySalesChannel = buildChart(\n  \"bar\",\n  \"Revenue by Sales Channel\",\n  Object.keys(kpi.revenueBySalesChannel),\n  Object.values(kpi.revenueBySalesChannel)\n);\n\n// -------------------------------\n// Chart 4: Orders by Date (FIXED)\n// -------------------------------\nconst sortedDates = Object.keys(kpi.ordersByDate).sort();\nconst sortedOrderCounts = sortedDates.map(\n  d => kpi.ordersByDate[d]\n);\n\nconst ordersByDate = buildChart(\n  \"line\",\n  \"Orders by Date\",\n  sortedDates,\n  sortedOrderCounts\n);\n\n// -------------------------------\n// FINAL OUTPUT (URLs)\n// -------------------------------\nreturn [\n  {\n    json: {\n      chartUrls: {\n        revenueByCategory: toQuickChartUrl(revenueByCategory),\n        ordersByPaymentMethod: toQuickChartUrl(ordersByPaymentMethod),\n        revenueBySalesChannel: toQuickChartUrl(revenueBySalesChannel),\n        ordersByDate: toQuickChartUrl(ordersByDate)\n      }\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        608,
+        -112
+      ],
+      "id": "69311fba-4967-4088-a31f-6ea553a0618f",
+      "name": "Visualization"
+    },
+    {
+      "parameters": {
+        "jsCode": "const kpi = $node[\"KPIs & Metrics\"].json;\nconst charts = $node[\"Visualization\"].json.chartUrls;\n\n// 🔗 GOOGLE SHEET LINK\nconst googleSheetLink =\n  \"https://docs.google.com/spreadsheets/d/12S4EcAI8XdzvxOE02-CzjzLkSWsCdjcC1tGGCNaWn2Y/edit?usp=sharing\";\n\nconst html = `\n<div style=\"font-family: Arial, sans-serif; background:#f5f7fa; padding:24px\">\n\n  <!-- HEADER -->\n  <div style=\"background:#ffffff;padding:22px;border-radius:12px;\n              box-shadow:0 4px 10px rgba(0,0,0,0.06);\">\n    <h1 style=\"margin:0;color:#1f2937;\">Automated Sales Analytics Report</h1>\n    <p style=\"margin-top:6px;color:#6b7280;\">\n      Generated automatically from Google Sheets using n8n\n    </p>\n  </div>\n\n  <!-- KPI SECTION -->\n  <div style=\"margin-top:28px;\">\n    <h2 style=\"color:#111827;\">Key Performance Indicators</h2>\n\n    <table width=\"100%\" cellspacing=\"16\">\n      <tr>\n\n        <td style=\"background:#ffffff;padding:18px;border-radius:12px;\n                   box-shadow:0 4px 10px rgba(0,0,0,0.06);text-align:center;\">\n          <div style=\"color:#6b7280;\">Total Revenue</div>\n          <div style=\"font-size:22px;font-weight:bold;color:#111827;\">\n            ${kpi.totalRevenue}\n          </div>\n        </td>\n\n        <td style=\"background:#ffffff;padding:18px;border-radius:12px;\n                   box-shadow:0 4px 10px rgba(0,0,0,0.06);text-align:center;\">\n          <div style=\"color:#6b7280;\">Total Quantity Sold</div>\n          <div style=\"font-size:22px;font-weight:bold;color:#111827;\">\n            ${kpi.totalQuantitySold}\n          </div>\n        </td>\n\n        <td style=\"background:#ffffff;padding:18px;border-radius:12px;\n                   box-shadow:0 4px 10px rgba(0,0,0,0.06);text-align:center;\">\n          <div style=\"color:#6b7280;\">Average Order Value</div>\n          <div style=\"font-size:22px;font-weight:bold;color:#111827;\">\n            ${kpi.averageOrderValue}\n          </div>\n        </td>\n\n        <!-- ✅ ONLY CATEGORY NAME -->\n        <td style=\"background:#ffffff;padding:18px;border-radius:12px;\n                   box-shadow:0 4px 10px rgba(0,0,0,0.06);text-align:center;\">\n          <div style=\"color:#6b7280;\">Top Category</div>\n          <div style=\"font-size:20px;font-weight:bold;color:#2563eb;\">\n            ${kpi.topCategoryByRevenue.category}\n          </div>\n        </td>\n\n      </tr>\n    </table>\n  </div>\n\n  <!-- CHARTS -->\n  <div style=\"margin-top:36px;\">\n\n    <h2 style=\"text-align:center;\">Revenue by Product Category</h2>\n    <div style=\"text-align:center;margin:18px 0 36px;\">\n      <img src=\"${charts.revenueByCategory}\"\n           style=\"max-width:720px;width:100%;\n           border-radius:12px;\n           box-shadow:0 4px 10px rgba(0,0,0,0.08);\" />\n    </div>\n\n    <h2 style=\"text-align:center;\">Orders by Payment Method</h2>\n    <div style=\"text-align:center;margin:18px 0 36px;\">\n      <img src=\"${charts.ordersByPaymentMethod}\"\n           style=\"max-width:720px;width:100%;\n           border-radius:12px;\n           box-shadow:0 4px 10px rgba(0,0,0,0.08);\" />\n    </div>\n\n    <h2 style=\"text-align:center;\">Revenue by Sales Channel</h2>\n    <div style=\"text-align:center;margin:18px 0 36px;\">\n      <img src=\"${charts.revenueBySalesChannel}\"\n           style=\"max-width:720px;width:100%;\n           border-radius:12px;\n           box-shadow:0 4px 10px rgba(0,0,0,0.08);\" />\n    </div>\n\n  </div>\n\n  <!-- SOURCE -->\n  <div style=\"margin-top:36px;background:#ffffff;padding:22px;\n              border-radius:12px;\n              box-shadow:0 4px 10px rgba(0,0,0,0.06);\">\n    <h3>Source Data</h3>\n    <p>\n      <a href=\"${googleSheetLink}\" target=\"_blank\"\n         style=\"color:#2563eb;font-weight:bold;text-decoration:none;\">\n         View Complete Sales Data\n      </a>\n    </p>\n  </div>\n\n  <!-- FOOTER -->\n  <p style=\"font-size:12px;color:#6b7280;\n            text-align:center;margin-top:28px;\">\n    This report was generated automatically using n8n\n  </p>\n\n</div>\n`;\n\nreturn [{ json: { html } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        -112
+      ],
+      "id": "ea95efef-6f5a-4574-9d27-03afa13b4d9a",
+      "name": "Report"
+    },
+    {
+      "parameters": {
+        "sendTo": "malini.soloist@gmail.com",
+        "subject": "Automated Sales Analytics Report",
+        "message": "={{ $json.html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1056,
+        -112
+      ],
+      "id": "2a4991af-723c-4fdb-90d6-e955fdbdde69",
+      "name": "Send Report Email",
+      "webhookId": "bdf910f3-8353-4a59-bb1b-dd8c553e4139",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "em3com6E62qLLSTn",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Google Sheets Trigger": {
+      "main": [
+        [
+          {
+            "node": "Data Cleaning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data Cleaning": {
+      "main": [
+        [
+          {
+            "node": "KPIs & Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "KPIs & Metrics": {
+      "main": [
+        [
+          {
+            "node": "Visualization",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Visualization": {
+      "main": [
+        [
+          {
+            "node": "Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report": {
+      "main": [
+        [
+          {
+            "node": "Send Report Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "41a2e1ec-6710-46c3-8ca2-f43c4643dd60",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "a09556feb3fc091f87ba7c639a445297c57190734c6fab9da475ceb1c7fd74a7"
+  },
+  "nodeGroups": [],
+  "id": "kziZQht5jhpX2dq7",
+  "tags": []
+}
